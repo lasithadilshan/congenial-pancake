@@ -25,9 +25,9 @@ jobs:
           sudo apt upgrade -y
 
       # -------------------------------------------------
-      # Install XFCE Desktop, XRDP & VirtualBox
+      # Install XFCE Desktop, XRDP, VirtualBox & Tools
       # -------------------------------------------------
-      - name: Install Desktop Environment & Tools
+      - name: Install Required Packages
         run: |
           sudo apt install -y \
             xfce4 \
@@ -36,12 +36,20 @@ jobs:
             virtualbox \
             wget \
             unzip \
-            curl
+            curl \
+            python3-pip
+
+      # -------------------------------------------------
+      # Install gdown for Google Drive Downloads
+      # -------------------------------------------------
+      - name: Install gdown
+        run: |
+          pip install gdown
 
       # -------------------------------------------------
       # Enable XRDP Service
       # -------------------------------------------------
-      - name: Enable XRDP Service
+      - name: Enable XRDP
         run: |
           sudo systemctl enable xrdp
           sudo systemctl start xrdp
@@ -49,25 +57,33 @@ jobs:
       # -------------------------------------------------
       # Configure XFCE Session
       # -------------------------------------------------
-      - name: Configure XRDP XFCE Session
+      - name: Configure XFCE Session
         run: |
           echo "xfce4-session" > ~/.xsession
           sudo adduser xrdp ssl-cert
 
       # -------------------------------------------------
-      # Configure RDP Credentials
+      # Set RDP Password
       # -------------------------------------------------
-      - name: Set RDP Password
+      - name: Configure RDP Credentials
         run: |
           echo "runner:Kali@123" | sudo chpasswd
 
       # -------------------------------------------------
-      # Download pfSense ISO
+      # Download pfSense ISO from Google Drive
       # -------------------------------------------------
       - name: Download pfSense ISO
         run: |
-          wget -O /home/runner/pfsense.iso \
-            "https://drive.google.com/uc?export=download&id=1cRPYjEY_s_mdvC1dvdmD0fTWkXVt6u9D"
+          gdown "https://drive.google.com/uc?id=1cRPYjEY_s_mdvC1dvdmD0fTWkXVt6u9D" \
+            -O /home/runner/pfsense.iso
+
+      # -------------------------------------------------
+      # Verify pfSense ISO
+      # -------------------------------------------------
+      - name: Verify pfSense ISO
+        run: |
+          ls -lh /home/runner/pfsense.iso
+          file /home/runner/pfsense.iso
 
       # -------------------------------------------------
       # Download Kali Linux ARM64 ISO
@@ -76,6 +92,14 @@ jobs:
         run: |
           wget -O /home/runner/kali.iso \
             "https://cdimage.kali.org/kali-2026.1/kali-linux-2026.1-installer-arm64.iso"
+
+      # -------------------------------------------------
+      # Verify Kali ISO
+      # -------------------------------------------------
+      - name: Verify Kali ISO
+        run: |
+          ls -lh /home/runner/kali.iso
+          file /home/runner/kali.iso
 
       # -------------------------------------------------
       # Create pfSense Virtual Machine
@@ -93,7 +117,7 @@ jobs:
             --vram 16
 
           VBoxManage createhd \
-            --filename ~/VirtualBox\ VMs/pfSense/pfSense.vdi \
+            --filename "$HOME/VirtualBox VMs/pfSense/pfSense.vdi" \
             --size 10240
 
           VBoxManage storagectl "pfSense" \
@@ -105,7 +129,7 @@ jobs:
             --port 0 \
             --device 0 \
             --type hdd \
-            --medium ~/VirtualBox\ VMs/pfSense/pfSense.vdi
+            --medium "$HOME/VirtualBox VMs/pfSense/pfSense.vdi"
 
           VBoxManage storageattach "pfSense" \
             --storagectl "SATA" \
@@ -135,7 +159,7 @@ jobs:
             --vram 16
 
           VBoxManage createhd \
-            --filename ~/VirtualBox\ VMs/Kali/Kali.vdi \
+            --filename "$HOME/VirtualBox VMs/Kali/Kali.vdi" \
             --size 25600
 
           VBoxManage storagectl "Kali" \
@@ -147,7 +171,7 @@ jobs:
             --port 0 \
             --device 0 \
             --type hdd \
-            --medium ~/VirtualBox\ VMs/Kali/Kali.vdi
+            --medium "$HOME/VirtualBox VMs/Kali/Kali.vdi"
 
           VBoxManage storageattach "Kali" \
             --storagectl "SATA" \
@@ -176,9 +200,9 @@ jobs:
           ./ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
       # -------------------------------------------------
-      # Start Ngrok TCP Tunnel
+      # Start RDP Tunnel
       # -------------------------------------------------
-      - name: Start RDP Tunnel
+      - name: Start Ngrok TCP Tunnel
         run: |
           ./ngrok tcp 3389 --log=stdout &
           sleep 15
@@ -186,7 +210,7 @@ jobs:
       # -------------------------------------------------
       # Display Connection Information
       # -------------------------------------------------
-      - name: Show RDP Connection Details
+      - name: Show Connection Details
         run: |
           echo ""
           echo "=========== NGROK DETAILS ==========="
@@ -198,11 +222,11 @@ jobs:
           echo "Desktop      : XFCE"
           echo "VirtualBox   : Installed"
           echo "VMs Created  : pfSense + Kali"
-          echo "Network      : Internal Network (labnet)"
+          echo "Network Name : labnet"
           echo "====================================="
 
       # -------------------------------------------------
-      # Keep GitHub Actions Runner Alive
+      # Keep Runner Alive
       # -------------------------------------------------
       - name: Keep Session Alive
         run: |
