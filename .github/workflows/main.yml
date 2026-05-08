@@ -1,235 +1,48 @@
-name: Lab Environment (pfSense + Kali)
+name: Kali Linux RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-lab:
+  kali-rdp:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-
-      # -------------------------------------------------
-      # Checkout Repository
-      # -------------------------------------------------
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # -------------------------------------------------
-      # Update Ubuntu System
-      # -------------------------------------------------
-      - name: Update System Packages
+      - name: Install XFCE & XRDP
         run: |
-          sudo apt update
-          sudo apt upgrade -y
+          sudo apt update -qq
+          sudo apt install -y xfce4 xrdp
 
-      # -------------------------------------------------
-      # Install XFCE Desktop, XRDP, VirtualBox & Tools
-      # -------------------------------------------------
-      - name: Install Required Packages
-        run: |
-          sudo apt install -y \
-            xfce4 \
-            xfce4-goodies \
-            xrdp \
-            virtualbox \
-            wget \
-            unzip \
-            curl \
-            python3-pip
+      - name: Set RDP Password
+        run: echo "runner:Kali@123" | sudo chpasswd
 
-      # -------------------------------------------------
-      # Install gdown for Google Drive Downloads
-      # -------------------------------------------------
-      - name: Install gdown
-        run: |
-          pip install gdown
-
-      # -------------------------------------------------
-      # Enable XRDP Service
-      # -------------------------------------------------
-      - name: Enable XRDP
-        run: |
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
-
-      # -------------------------------------------------
-      # Configure XFCE Session
-      # -------------------------------------------------
       - name: Configure XFCE Session
         run: |
           echo "xfce4-session" > ~/.xsession
           sudo adduser xrdp ssl-cert
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
 
-      # -------------------------------------------------
-      # Set RDP Password
-      # -------------------------------------------------
-      - name: Configure RDP Credentials
+      - name: Download & Setup Ngrok
         run: |
-          echo "runner:Kali@123" | sudo chpasswd
-
-      # -------------------------------------------------
-      # Download pfSense ISO from Google Drive
-      # -------------------------------------------------
-      - name: Download pfSense ISO
-        run: |
-          gdown "https://drive.google.com/uc?id=1cRPYjEY_s_mdvC1dvdmD0fTWkXVt6u9D" \
-            -O /home/runner/pfsense.iso
-
-      # -------------------------------------------------
-      # Verify pfSense ISO
-      # -------------------------------------------------
-      - name: Verify pfSense ISO
-        run: |
-          ls -lh /home/runner/pfsense.iso
-          file /home/runner/pfsense.iso
-
-      # -------------------------------------------------
-      # Download Kali Linux ARM64 ISO
-      # -------------------------------------------------
-      - name: Download Kali Linux ISO
-        run: |
-          wget -O /home/runner/kali.iso \
-            "https://cdimage.kali.org/kali-2026.1/kali-linux-2026.1-installer-arm64.iso"
-
-      # -------------------------------------------------
-      # Verify Kali ISO
-      # -------------------------------------------------
-      - name: Verify Kali ISO
-        run: |
-          ls -lh /home/runner/kali.iso
-          file /home/runner/kali.iso
-
-      # -------------------------------------------------
-      # Create pfSense Virtual Machine
-      # -------------------------------------------------
-      - name: Create pfSense VM
-        run: |
-          VBoxManage createvm \
-            --name "pfSense" \
-            --ostype FreeBSD_64 \
-            --register
-
-          VBoxManage modifyvm "pfSense" \
-            --memory 1024 \
-            --cpus 1 \
-            --vram 16
-
-          VBoxManage createhd \
-            --filename "$HOME/VirtualBox VMs/pfSense/pfSense.vdi" \
-            --size 10240
-
-          VBoxManage storagectl "pfSense" \
-            --name "SATA" \
-            --add sata
-
-          VBoxManage storageattach "pfSense" \
-            --storagectl "SATA" \
-            --port 0 \
-            --device 0 \
-            --type hdd \
-            --medium "$HOME/VirtualBox VMs/pfSense/pfSense.vdi"
-
-          VBoxManage storageattach "pfSense" \
-            --storagectl "SATA" \
-            --port 1 \
-            --device 0 \
-            --type dvddrive \
-            --medium /home/runner/pfsense.iso
-
-          VBoxManage modifyvm "pfSense" \
-            --nic1 nat \
-            --nic2 intnet \
-            --intnet2 "labnet"
-
-      # -------------------------------------------------
-      # Create Kali Linux Virtual Machine
-      # -------------------------------------------------
-      - name: Create Kali Linux VM
-        run: |
-          VBoxManage createvm \
-            --name "Kali" \
-            --ostype Linux_64 \
-            --register
-
-          VBoxManage modifyvm "Kali" \
-            --memory 2048 \
-            --cpus 2 \
-            --vram 16
-
-          VBoxManage createhd \
-            --filename "$HOME/VirtualBox VMs/Kali/Kali.vdi" \
-            --size 25600
-
-          VBoxManage storagectl "Kali" \
-            --name "SATA" \
-            --add sata
-
-          VBoxManage storageattach "Kali" \
-            --storagectl "SATA" \
-            --port 0 \
-            --device 0 \
-            --type hdd \
-            --medium "$HOME/VirtualBox VMs/Kali/Kali.vdi"
-
-          VBoxManage storageattach "Kali" \
-            --storagectl "SATA" \
-            --port 1 \
-            --device 0 \
-            --type dvddrive \
-            --medium /home/runner/kali.iso
-
-          VBoxManage modifyvm "Kali" \
-            --nic1 intnet \
-            --intnet1 "labnet"
-
-      # -------------------------------------------------
-      # Download Ngrok
-      # -------------------------------------------------
-      - name: Download Ngrok
-        run: |
-          wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
-          unzip ngrok-v3-stable-linux-amd64.zip
-
-      # -------------------------------------------------
-      # Authenticate Ngrok
-      # -------------------------------------------------
-      - name: Authenticate Ngrok
-        run: |
+          wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
+          unzip -q ngrok-v3-stable-linux-amd64.zip
           ./ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      # -------------------------------------------------
-      # Start RDP Tunnel
-      # -------------------------------------------------
       - name: Start Ngrok TCP Tunnel
         run: |
           ./ngrok tcp 3389 --log=stdout &
-          sleep 15
+          sleep 10
 
-      # -------------------------------------------------
-      # Display Connection Information
-      # -------------------------------------------------
-      - name: Show Connection Details
+      - name: Show Connection Info
         run: |
-          echo ""
-          echo "=========== NGROK DETAILS ==========="
-          curl -s http://127.0.0.1:4040/api/tunnels
-          echo ""
-          echo "====================================="
-          echo "RDP Username : runner"
-          echo "RDP Password : Kali@123"
-          echo "Desktop      : XFCE"
-          echo "VirtualBox   : Installed"
-          echo "VMs Created  : pfSense + Kali"
-          echo "Network Name : labnet"
-          echo "====================================="
+          echo "==============================="
+          curl -s http://127.0.0.1:4040/api/tunnels | python3 -c \
+            "import sys,json; t=json.load(sys.stdin)['tunnels'][0]['public_url']; print('RDP Host :', t.replace('tcp://',''))"
+          echo "Username : runner"
+          echo "Password : Kali@123"
+          echo "==============================="
 
-      # -------------------------------------------------
-      # Keep Runner Alive
-      # -------------------------------------------------
-      - name: Keep Session Alive
-        run: |
-          while true; do
-            sleep 300
-          done
+      - name: Keep Alive
+        run: sleep infinity
