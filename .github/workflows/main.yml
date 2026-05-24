@@ -1,35 +1,31 @@
 name: Windows RDP for GX Works2
-
 on:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 360
-
     steps:
-
       - name: Enable Remote Desktop
         shell: powershell
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
+          # Disable NLA requirement
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0
+
       - name: Create RDP User
         shell: powershell
         run: |
           $username = "runneradmin"
           $password = "Pass@12345"
-
           $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
           if (-not $userExists) {
               net user $username $password /add
           }
-
           $groupCheck = net localgroup administrators | Select-String $username
-
           if (-not $groupCheck) {
               net localgroup administrators $username /add
           }
@@ -40,7 +36,6 @@ jobs:
           Invoke-WebRequest `
             https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip `
             -OutFile ngrok.zip
-
           Expand-Archive ngrok.zip -DestinationPath ngrok
 
       - name: Authenticate Ngrok
@@ -65,7 +60,6 @@ jobs:
         run: |
           $json = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
           $url = $json.tunnels[0].public_url
-
           Write-Host ""
           Write-Host "================================="
           Write-Host "RDP HOST : $($url.Replace('tcp://',''))"
