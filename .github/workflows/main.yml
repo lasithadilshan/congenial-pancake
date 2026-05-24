@@ -1,25 +1,30 @@
-name: GX Works2 PLC RDP
+name: Windows RDP for GX Works2
 
 on:
   workflow_dispatch:
 
 jobs:
-  plc-rdp:
+  build:
     runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-      - name: Enable Remote Desktop
+      - name: Enable RDP
         shell: powershell
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: Create RDP User
+      - name: Create User
         shell: powershell
         run: |
-          net user plcuser Plc@12345 /add
-          net localgroup administrators plcuser /add
+          net user runneradmin Pass@12345 /add
+          net localgroup administrators runneradmin /add
+
+      - name: Set Password Never Expire
+        shell: powershell
+        run: |
+          WMIC USERACCOUNT WHERE "Name='runneradmin'" SET PasswordExpires=FALSE
 
       - name: Download Ngrok
         shell: powershell
@@ -27,34 +32,34 @@ jobs:
           Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath ngrok
 
-      - name: Authenticate Ngrok
+      - name: Auth Ngrok
         shell: powershell
         run: |
           .\ngrok\ngrok.exe authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
 
-      - name: Start Ngrok Tunnel
+      - name: Start Tunnel
         shell: powershell
         run: |
           Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389"
 
-      - name: Wait for Tunnel
+      - name: Wait
         shell: powershell
         run: |
-          Start-Sleep -Seconds 15
+          Start-Sleep 20
 
-      - name: Show RDP Details
+      - name: Show Details
         shell: powershell
         run: |
           $json = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
           $url = $json.tunnels[0].public_url
 
-          Write-Host "================================="
-          Write-Host "RDP HOST :" $url.Replace("tcp://","")
-          Write-Host "USERNAME : plcuser"
-          Write-Host "PASSWORD : Plc@12345"
-          Write-Host "================================="
+          echo "=============================="
+          echo "HOST: $($url.Replace('tcp://',''))"
+          echo "USERNAME: runneradmin"
+          echo "PASSWORD: Pass@12345"
+          echo "=============================="
 
-      - name: Keep Runner Alive
+      - name: Keep Alive
         shell: powershell
         run: |
           Start-Sleep -Seconds 21600
