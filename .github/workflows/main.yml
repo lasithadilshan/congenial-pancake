@@ -1,48 +1,55 @@
-name: Kali Linux RDP
+name: GX Works2 PLC RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  kali-rdp:
-    runs-on: ubuntu-latest
+  plc-rdp:
+    runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-      - name: Install XFCE & XRDP
+      - name: Enable Remote Desktop
         run: |
-          sudo apt update -qq
-          sudo apt install -y xfce4 xrdp
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: Set RDP Password
-        run: echo "runner:Kali@123" | sudo chpasswd
-
-      - name: Configure XFCE Session
+      - name: Create RDP User
         run: |
-          echo "xfce4-session" > ~/.xsession
-          sudo adduser xrdp ssl-cert
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
+          net user plcuser Plc@12345 /add
+          net localgroup administrators plcuser /add
 
-      - name: Download & Setup Ngrok
+      - name: Download Ngrok
         run: |
-          wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
-          unzip -q ngrok-v3-stable-linux-amd64.zip
-          ./ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+          Expand-Archive ngrok.zip
 
-      - name: Start Ngrok TCP Tunnel
+      - name: Authenticate Ngrok
         run: |
-          ./ngrok tcp 3389 --log=stdout &
-          sleep 10
+          .\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      - name: Show Connection Info
+      - name: Start Ngrok Tunnel
         run: |
-          echo "==============================="
-          curl -s http://127.0.0.1:4040/api/tunnels | python3 -c \
-            "import sys,json; t=json.load(sys.stdin)['tunnels'][0]['public_url']; print('RDP Host :', t.replace('tcp://',''))"
-          echo "Username : runner"
-          echo "Password : Kali@123"
-          echo "==============================="
+          Start-Process .\ngrok.exe -ArgumentList "tcp 3389"
 
-      - name: Keep Alive
-        run: sleep infinity
+      - name: Wait for Tunnel
+        run: Start-Sleep -Seconds 15
+
+      - name: Show RDP Details
+        run: |
+          $json = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
+          $url = $json.tunnels[0].public_url
+          Write-Host "================================="
+          Write-Host "RDP HOST :" $url.Replace("tcp://","")
+          Write-Host "USERNAME : plcuser"
+          Write-Host "PASSWORD : Plc@12345"
+          Write-Host "================================="
+
+      - name: Download GX Works2 Installer
+        run: |
+          Write-Host "Upload GX Works2 installer manually after connecting."
+          Write-Host "Then install GX Works2 inside the RDP."
+
+      - name: Keep Runner Alive
+        run: |
+          Start-Sleep -Seconds 21600
