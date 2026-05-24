@@ -9,19 +9,12 @@ jobs:
       - name: Enable Remote Desktop
         shell: powershell
         run: |
-          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-          # Disable NLA completely
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MinEncryptionLevel" -Value 1
-
-          # Disable Windows Firewall completely
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
-
-          # Restart RDP service to apply changes
           Restart-Service -Name "TermService" -Force
 
       - name: Create RDP User
@@ -38,43 +31,38 @@ jobs:
               net localgroup administrators $username /add
           }
 
-      - name: Download Ngrok
+      - name: Download Cloudflare Tunnel
         shell: powershell
         run: |
           Invoke-WebRequest `
-            https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip `
-            -OutFile ngrok.zip
-          Expand-Archive ngrok.zip -DestinationPath ngrok
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe `
+            -OutFile cloudflared.exe
 
-      - name: Authenticate Ngrok
-        shell: powershell
-        run: |
-          .\ngrok\ngrok.exe authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
-
-      - name: Start Ngrok Tunnel
+      - name: Start Cloudflare Tunnel
         shell: powershell
         run: |
           Start-Process `
-            -FilePath ".\ngrok\ngrok.exe" `
-            -ArgumentList "tcp 3389"
+            -FilePath ".\cloudflared.exe" `
+            -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate"
 
       - name: Wait for Tunnel
         shell: powershell
         run: |
-          Start-Sleep -Seconds 20
+          Start-Sleep -Seconds 15
 
       - name: Show RDP Details
         shell: powershell
         run: |
-          $json = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
-          $url = $json.tunnels[0].public_url
+          # Get the tunnel URL from cloudflared log
+          $logPath = "$env:USERPROFILE\.cloudflared\tunnel.log"
+          Start-Sleep -Seconds 5
+          $url = (Get-Content $logPath -ErrorAction SilentlyContinue | Select-String "trycloudflare.com") | Select-Object -Last 1
           Write-Host ""
           Write-Host "================================="
-          Write-Host "RDP HOST : $($url.Replace('tcp://',''))"
+          Write-Host "RDP HOST : $url"
           Write-Host "USERNAME : runneradmin"
           Write-Host "PASSWORD : Pass@12345"
           Write-Host "================================="
-          Write-Host ""
 
       - name: Keep Runner Alive
         shell: powershell
