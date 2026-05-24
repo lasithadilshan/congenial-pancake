@@ -9,7 +9,8 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Enable RDP
+
+      - name: Enable Remote Desktop
         shell: powershell
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
@@ -21,29 +22,25 @@ jobs:
           $username = "runneradmin"
           $password = "Pass@12345"
 
-          # Check if user exists
           $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
 
           if (-not $userExists) {
               net user $username $password /add
           }
 
-          # Add to Administrators group safely
           $groupCheck = net localgroup administrators | Select-String $username
 
           if (-not $groupCheck) {
               net localgroup administrators $username /add
           }
 
-      - name: Disable Password Expiry
-        shell: powershell
-        run: |
-          WMIC USERACCOUNT WHERE "Name='runneradmin'" SET PasswordExpires=FALSE
-
       - name: Download Ngrok
         shell: powershell
         run: |
-          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+          Invoke-WebRequest `
+            https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip `
+            -OutFile ngrok.zip
+
           Expand-Archive ngrok.zip -DestinationPath ngrok
 
       - name: Authenticate Ngrok
@@ -54,7 +51,9 @@ jobs:
       - name: Start Ngrok Tunnel
         shell: powershell
         run: |
-          Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389"
+          Start-Process `
+            -FilePath ".\ngrok\ngrok.exe" `
+            -ArgumentList "tcp 3389"
 
       - name: Wait for Tunnel
         shell: powershell
@@ -67,11 +66,13 @@ jobs:
           $json = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
           $url = $json.tunnels[0].public_url
 
+          Write-Host ""
           Write-Host "================================="
-          Write-Host "RDP HOST :" $url.Replace("tcp://","")
+          Write-Host "RDP HOST : $($url.Replace('tcp://',''))"
           Write-Host "USERNAME : runneradmin"
           Write-Host "PASSWORD : Pass@12345"
           Write-Host "================================="
+          Write-Host ""
 
       - name: Keep Runner Alive
         shell: powershell
