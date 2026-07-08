@@ -1,0 +1,212 @@
+name: Browser RDP for GX Works2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    name: Temporary Windows Browser RDP
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    env:
+      RDP_USERNAME: gxrdp
+      RDP_LOOPBACK_IP: 10.255.255.10
+
+    steps:
+      - name: Prepare secure RDP user
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+            throw "RDP_PASSWORD GitHub secret is missing."
+          }
+
+          Write-Host "::add-mask::$env:RDP_PASSWORD"
+
+          $username = $env:RDP_USERNAME
+          $securePassword = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+            Set-LocalUser -Name $username -Password $securePassword
+          }
+          else {
+            New-LocalUser `
+              -Name $username `
+              -Password $securePassword `
+              -FullName "Temporary GX Works2 RDP User" `
+              -Description "Temporary GitHub Actions RDP account" `
+              -PasswordNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+
+      - name: Enable Remote Desktop safely
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          # Keep Network Level Authentication enabled.
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1
+
+          # Use TLS security layer.
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "SecurityLayer" `
+            -Value 2
+
+          # High encryption.
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "MinEncryptionLevel" `
+            -Value 3
+
+          Set-Service -Name "TermService" -StartupType Automatic
+          Restart-Service -Name "TermService" -Force
+
+      - name: Add fixed private loopback IP for Cloudflare target
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $ip = $env:RDP_LOOPBACK_IP
+
+          # Add a stable local IP so Cloudflare can always target the same address.
+          $existing = Get-NetIPAddress -IPAddress $ip -ErrorAction SilentlyContinue
+          if (-not $existing) {
+            New-NetIPAddress `
+              -IPAddress $ip `
+              -PrefixLength 32 `
+              -InterfaceAlias "Loopback Pseudo-Interface 1" `
+              -ErrorAction Stop | Out-Null
+          }
+
+          Write-Host "Fixed RDP target IP: $ip"
+
+      - name: Configure firewall for local Cloudflare tunnel only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue |
+            Disable-NetFirewallRule
+
+          Get-NetFirewallRule -DisplayName "RDP - Cloudflare Tunnel Only" -ErrorAction SilentlyContinue |
+            Remove-NetFirewallRule
+
+          New-NetFirewallRule `
+            -DisplayName "RDP - Cloudflare Tunnel Only" `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol TCP `
+            -LocalPort 3389 `
+            -RemoteAddress 127.0.0.1,10.255.255.10 `
+            -Profile Any | Out-Null
+
+      - name: Verify RDP service
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $readyLocalhost = Test-NetConnection -ComputerName "127.0.0.1" -Port 3389 -InformationLevel Quiet
+          $readyLoopback = Test-NetConnection -ComputerName $env:RDP_LOOPBACK_IP -Port 3389 -InformationLevel Quiet
+
+          if (-not $readyLocalhost) {
+            throw "RDP is not listening on 127.0.0.1:3389"
+          }
+
+          if (-not $readyLoopback) {
+            throw "RDP is not reachable on $env:RDP_LOOPBACK_IP:3389"
+          }
+
+          Write-Host "RDP is ready."
+
+      - name: Download cloudflared
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" `
+            -OutFile "$env:RUNNER_TEMP\cloudflared.exe"
+
+      - name: Start Cloudflare named tunnel
+        shell: powershell
+        env:
+          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:CF_TUNNEL_TOKEN)) {
+            throw "CF_TUNNEL_TOKEN GitHub secret is missing."
+          }
+
+          Write-Host "::add-mask::$env:CF_TUNNEL_TOKEN"
+
+          $cloudflared = "$env:RUNNER_TEMP\cloudflared.exe"
+          $logFile = "$env:RUNNER_TEMP\cloudflared.log"
+
+          Start-Process `
+            -FilePath $cloudflared `
+            -ArgumentList "tunnel --no-autoupdate run --token $env:CF_TUNNEL_TOKEN" `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError $logFile `
+            -WindowStyle Hidden
+
+          Start-Sleep -Seconds 10
+
+          if (Test-Path $logFile) {
+            Get-Content $logFile -Tail 30
+          }
+
+          $process = Get-Process cloudflared -ErrorAction SilentlyContinue
+          if (-not $process) {
+            throw "cloudflared did not start."
+          }
+
+          Write-Host "Cloudflare tunnel started."
+
+      - name: Show browser RDP instructions
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "===================================================="
+          Write-Host "BROWSER RDP IS READY"
+          Write-Host "===================================================="
+          Write-Host "Open Cloudflare Access App Launcher in your browser:"
+          Write-Host "https://<your-team-name>.cloudflareaccess.com"
+          Write-Host ""
+          Write-Host "Then select your RDP application tile."
+          Write-Host ""
+          Write-Host "Windows username:"
+          Write-Host ".\gxrdp"
+          Write-Host ""
+          Write-Host "Windows password:"
+          Write-Host "Use your GitHub secret value: RDP_PASSWORD"
+          Write-Host ""
+          Write-Host "Cloudflare target IP:"
+          Write-Host "$env:RDP_LOOPBACK_IP"
+          Write-Host ""
+          Write-Host "RDP port:"
+          Write-Host "3389"
+          Write-Host "===================================================="
+          Write-Host ""
+
+      - name: Keep Windows PC alive
+        shell: powershell
+        run: |
+          # Keep alive for 5 hours 45 minutes.
+          # GitHub-hosted jobs have a 360-minute limit.
+          Start-Sleep -Seconds 20700
